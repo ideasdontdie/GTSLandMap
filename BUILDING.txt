@@ -1,0 +1,19 @@
+GTS Land Map - source code of GTSLandMap.dll
+Copyright (C) 2026 mxdie
+
+Licensed under the GNU General Public License v3.0, see LICENSE.txt.
+
+There are two builds of the dll:
+  plugin/        Small and Medium sizes: camera, zoom, panning, day and night sheets.
+  plugin_tiles/  Large and Full sizes: the same, plus the sharp map tiles read while in view.
+
+1. Put CommonLibSSE-NG 13.1.0, unmodified, in lib/commonlibsse-ng:
+     git clone https://github.com/alandtse/CommonLibSSE-NG lib/commonlibsse-ng
+     git -C lib/commonlibsse-ng checkout 12d61f3c39f7d4ba1b1ab543df2bca0e613dc747
+2. For plugin_tiles only: unpack the official libwebp 1.6.0 Windows package
+   (libwebp-1.6.0-windows-x64.zip from the WebM project) into lib/.
+3. In plugin/ or plugin_tiles/, run: xmake build
+   (xmake and Visual Studio 2022 with C++). The dll lands in build/windows/x64/release/.
+
+Third-party licences (spdlog, DirectXMath, DirectX Tool Kit, libwebp) are in
+NOTICE.txt, as shipped with the mod.
