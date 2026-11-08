@@ -260,7 +260,8 @@ namespace
 	std::vector<RE::TESWorldSpace*> g_raised;  // lands whose limit has been lifted since the map opened: once each, so it can't creep
 
 	// Worlds with no sky (Blackreach) don't get the map's fog-free weather, so their own fog can swallow a sheet this far away.
-	void ClearFog()
+	// The fog and the sheet's chain are logged once for every world, so a blue map report shows which one hid it.
+	void ClearFog(bool a_noSky)
 	{
 		auto tes = RE::TES::GetSingleton();
 		auto sky = RE::Sky::GetSingleton();
@@ -273,11 +274,14 @@ namespace
 		}
 		if (!g.fogLogged && g_sheet) {
 			g.fogLogged = true;
-			logs::info("No sky world: fog {} to {} clamp {}, sky fog {} to {} clamp {} mode {} weather {:X}", fog ? fog->nearDistance : -1.0f, fog ? fog->farDistance : -1.0f, fog ? fog->clamp : -1.0f,
+			logs::info("No sky {}: fog {} to {} clamp {}, sky fog {} to {} clamp {} mode {} weather {:X}", a_noSky, fog ? fog->nearDistance : -1.0f, fog ? fog->farDistance : -1.0f, fog ? fog->clamp : -1.0f,
 				sky ? sky->fogNear : -1.0f, sky ? sky->fogFar : -1.0f, sky ? sky->fogClamp : -1.0f, sky ? static_cast<int>(sky->mode.get()) : -1, sky && sky->currentWeather ? sky->currentWeather->GetFormID() : 0);
 			for (RE::NiAVObject* p = g_sheet; p; p = p->parent) {
 				logs::info("  sheet chain: {} culled {}", p->name.c_str(), p->GetAppCulled());
 			}
+		}
+		if (!a_noSky) {
+			return;
 		}
 		if (fog) {
 			fog->nearDistance = 900000.0f;
@@ -289,9 +293,15 @@ namespace
 			sky->fogFar = 1000000.0f;
 			sky->fogClamp = 0.0f;
 		}
+	}
+
+	// Every world: after a session that began in an interior, the sheet or a node above it can stay hidden (the map shows only water).
+	void ShowSheet()
+	{
 		for (RE::NiAVObject* p = g_sheet; p; p = p->parent) {
 			if (p->GetAppCulled()) {
 				p->SetAppCulled(false);
+				logs::info("Unhid {} above the sheet", p->name.c_str());
 			}
 		}
 	}
@@ -362,9 +372,8 @@ namespace
 			offset.y = y;
 		}
 
-		if (data.worldSpace->flags.any(RE::TESWorldSpace::Flag::kNoSky)) {
-			ClearFog();
-		}
+		ClearFog(data.worldSpace->flags.any(RE::TESWorldSpace::Flag::kNoSky));
+		ShowSheet();
 		const float t = std::clamp(std::log(d / d0) / std::log(d1 / d0), 0.0f, 1.0f);
 		const float width = world->wnear * std::pow(world->wfar / world->wnear, t);
 		const float half = (std::min)(width / (2.0f * d), 1.0f);
