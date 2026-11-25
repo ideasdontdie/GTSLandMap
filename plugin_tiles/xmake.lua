@@ -1,7 +1,7 @@
 includes("../lib/commonlibsse-ng")
 
 set_project("GTSLandMap")
-set_version("0.1.1")
+set_version("0.1.2")
 set_languages("c++23")
 set_warnings("allextra")
 

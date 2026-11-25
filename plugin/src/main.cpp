@@ -190,8 +190,11 @@ namespace
 		}
 	}
 
-	float           g_sheetZ = 0.0f;    // where the sheet really is in the scene, 0 until found
-	RE::NiAVObject* g_sheet = nullptr;  // only used while the map is open
+	float g_sheetZ = 0.0f;  // where the sheet really is in the scene, 0 until found
+	// Ref-counted, not a raw NiAVObject*: a session that began in an interior can still be rebuilding the
+	// exterior LOD tree after the map's first frame, and a plain pointer to the node found then would dangle
+	// once the engine freed it, leaving ShowSheet() walking freed memory instead of the node actually drawn.
+	RE::NiPointer<RE::NiAVObject> g_sheet;  // only used while the map is open
 
 	// Night and day: every sheet carrying one of our textures gets the picture for the hour.
 	int SwapSheets(RE::NiAVObject* a_object, bool a_night)
@@ -223,7 +226,7 @@ namespace
 			return 0;
 		}
 		g_sheetZ = a_object->world.translate.z;
-		g_sheet = a_object;
+		g_sheet.reset(a_object);
 		if (a_night) {
 			path.insert(path.size() - 4, "_n");
 		}
@@ -244,7 +247,8 @@ namespace
 		bool  open = false;
 		float savedWorld = 90.0f, savedFirst = 90.0f;
 		int   frame = 0;
-		bool  sheetsDone = false;
+		bool  sheetFound = false;  // the sheet has been located at least once this session: gates the one-time open log
+		int   nextScan = 1;        // frame at which to next look for the sheet: kept up forever, not just for the first 600 frames
 		bool  frustumFallback = false;
 		int   mismatch = 0;
 		float lastD = 0.0f;
@@ -276,7 +280,7 @@ namespace
 			g.fogLogged = true;
 			logs::info("No sky {}: fog {} to {} clamp {}, sky fog {} to {} clamp {} mode {} weather {:X}", a_noSky, fog ? fog->nearDistance : -1.0f, fog ? fog->farDistance : -1.0f, fog ? fog->clamp : -1.0f,
 				sky ? sky->fogNear : -1.0f, sky ? sky->fogFar : -1.0f, sky ? sky->fogClamp : -1.0f, sky ? static_cast<int>(sky->mode.get()) : -1, sky && sky->currentWeather ? sky->currentWeather->GetFormID() : 0);
-			for (RE::NiAVObject* p = g_sheet; p; p = p->parent) {
+			for (RE::NiAVObject* p = g_sheet.get(); p; p = p->parent) {
 				logs::info("  sheet chain: {} culled {}", p->name.c_str(), p->GetAppCulled());
 			}
 		}
@@ -298,7 +302,7 @@ namespace
 	// Every world: after a session that began in an interior, the sheet or a node above it can stay hidden (the map shows only water).
 	void ShowSheet()
 	{
-		for (RE::NiAVObject* p = g_sheet; p; p = p->parent) {
+		for (RE::NiAVObject* p = g_sheet.get(); p; p = p->parent) {
 			if (p->GetAppCulled()) {
 				p->SetAppCulled(false);
 				logs::info("Unhid {} above the sheet", p->name.c_str());
@@ -427,7 +431,10 @@ namespace
 			logs::info("Camera {} {} z {} distance {} width {} fov {} right {} pan {}", root->world.translate.x, root->world.translate.y, root->world.translate.z, d, width, fov, camera ? camera->GetRuntimeData2().viewFrustum.fRight : 0.0f, pan);
 		}
 
-		if (!g.sheetsDone && g.frame % 30 == 1) {
+		// A session that began in an interior can still be streaming in the exterior LOD tree well past the
+		// old 600-frame cutoff, or rebuild it under g_sheet's feet after the first find: keep rescanning every
+		// 300 frames for as long as the map stays open, instead of giving up on the sheet forever.
+		if (g.frame >= g.nextScan) {
 			auto       calendar = RE::Calendar::GetSingleton();
 			const auto hour = calendar ? calendar->GetHour() : 12.0f;
 			const bool night = world->night && (hour >= 20.0f || hour < 5.0f);
@@ -436,10 +443,11 @@ namespace
 			if (!found) {
 				found = SwapSheets(RE::Main::WorldRootNode(), night);
 			}
-			if (found || g.frame > 600) {
-				g.sheetsDone = true;
+			if (found && !g.sheetFound) {
+				g.sheetFound = true;
 				logs::info("Hour {} night {} sheets {} frame {} sheet z {} camera z {}", hour, night, found, g.frame, g_sheetZ, camZ);
 			}
+			g.nextScan = g.frame + (g.sheetFound ? 300 : 30);
 		}
 	}
 
@@ -473,14 +481,14 @@ namespace
 				ApplyRecords(false);
 				g_raised.clear();
 				g_sheetZ = 0.0f;
-				g_sheet = nullptr;
+				g_sheet.reset();
 				g.savedWorld = fov.worldFOV;
 				g.savedFirst = fov.firstPersonFOV;
 				logs::info("Map opened, FOV was {} {}", g.savedWorld, g.savedFirst);
 			} else if (!a_event->opening && g.open) {
 				g.open = false;
 				RestoreFog();
-				g_sheet = nullptr;
+				g_sheet.reset();
 				if (g.frustumFallback) {
 					// The game only rebuilds the view when the value differs from its last one.
 					if (auto scene = RE::Main::WorldRootNode()) {
