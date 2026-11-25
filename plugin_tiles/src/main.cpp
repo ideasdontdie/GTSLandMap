@@ -239,8 +239,10 @@ namespace
 			logs::error("Could not load {}", path);
 			return 0;
 		}
-		material->sourceTexture = RE::NiPointer<RE::NiSourceTexture>(source);
-		logs::info("Sheet {} now shows {}", a_object->name.c_str(), path);
+		if (material->sourceTexture.get() != source) {
+			material->sourceTexture = RE::NiPointer<RE::NiSourceTexture>(source);
+			logs::info("Sheet {} now shows {}", a_object->name.c_str(), path);
+		}
 		return 1;
 	}
 
@@ -257,16 +259,19 @@ namespace
 		int   still = 0;
 		float lastLoggedD = 0.0f;
 		bool  fogSaved = false;
+		bool  skyFogSaved = false;
 		bool  tintSet = false;
 		bool  fogLogged = false;
 		float fogNear = 0.0f, fogFar = 0.0f, fogClamp = 0.0f;
+		float skyFogNear = 0.0f, skyFogFar = 0.0f, skyFogClamp = 0.0f;
 		bool  edgeLogged = false;
 	} g;
 
 	std::vector<RE::TESWorldSpace*> g_raised;  // lands whose limit has been lifted since the map opened: once each, so it can't creep
 
-	// Worlds with no sky (Blackreach) don't get the map's fog-free weather, so their own fog can swallow a sheet this far away.
-	// The fog and the sheet's chain are logged once for every world, so a blue map report shows which one hid it.
+	// The map sheet sits far away. Any fog - the world's own, or sky fog that never switched to the map weather after a session
+	// that began in an interior - can cover it with blue. Push both out for every world while the map is open, and log the sheet
+	// chain once so a blue map report shows whether the sheet or a parent above it stayed hidden.
 	void ClearFog(bool a_noSky)
 	{
 		auto tes = RE::TES::GetSingleton();
@@ -278,6 +283,12 @@ namespace
 			g.fogFar = fog->farDistance;
 			g.fogClamp = fog->clamp;
 		}
+		if (sky && !g.skyFogSaved) {
+			g.skyFogSaved = true;
+			g.skyFogNear = sky->fogNear;
+			g.skyFogFar = sky->fogFar;
+			g.skyFogClamp = sky->fogClamp;
+		}
 		if (!g.fogLogged && g_sheet) {
 			g.fogLogged = true;
 			logs::info("No sky {}: fog {} to {} clamp {}, sky fog {} to {} clamp {} mode {} weather {:X}", a_noSky, fog ? fog->nearDistance : -1.0f, fog ? fog->farDistance : -1.0f, fog ? fog->clamp : -1.0f,
@@ -285,9 +296,6 @@ namespace
 			for (RE::NiAVObject* p = g_sheet.get(); p; p = p->parent) {
 				logs::info("  sheet chain: {} culled {}", p->name.c_str(), p->GetAppCulled());
 			}
-		}
-		if (!a_noSky) {
-			return;
 		}
 		if (fog) {
 			fog->nearDistance = 900000.0f;
@@ -315,11 +323,17 @@ namespace
 	void RestoreFog()
 	{
 		auto tes = RE::TES::GetSingleton();
+		auto sky = RE::Sky::GetSingleton();
 		auto fog = tes ? netimmerse_cast<RE::BSFogProperty*>(tes->objFog) : nullptr;
 		if (fog && g.fogSaved) {
 			fog->nearDistance = g.fogNear;
 			fog->farDistance = g.fogFar;
 			fog->clamp = g.fogClamp;
+		}
+		if (sky && g.skyFogSaved) {
+			sky->fogNear = g.skyFogNear;
+			sky->fogFar = g.skyFogFar;
+			sky->fogClamp = g.skyFogClamp;
 		}
 	}
 
@@ -450,10 +464,12 @@ namespace
 			if (!found) {
 				found = SwapSheets(RE::Main::WorldRootNode(), night);
 			}
-			if (found && !g.sheetFound) {
-				g.sheetFound = true;
+			if (found) {
 				Tiles::Open(Lower(data.worldSpace->editorID.c_str()), g_sheet.get(), night);
-				logs::info("Hour {} night {} sheets {} frame {} sheet z {} camera z {}", hour, night, found, g.frame, g_sheetZ, camZ);
+				if (!g.sheetFound) {
+					g.sheetFound = true;
+					logs::info("Hour {} night {} sheets {} frame {} sheet z {} camera z {}", hour, night, found, g.frame, g_sheetZ, camZ);
+				}
 			}
 			g.nextScan = g.frame + (g.sheetFound ? 300 : 30);
 		}

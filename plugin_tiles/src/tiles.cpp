@@ -59,8 +59,8 @@ namespace Tiles
 		bool                                   g_placesRead = false;
 
 		std::vector<Slot>                      g_slots;
-		RE::NiAVObject*                        g_sheet = nullptr;
-		RE::NiNode*                            g_parent = nullptr;
+		RE::NiPointer<RE::NiAVObject>         g_sheet;
+		RE::NiPointer<RE::NiNode>              g_parent;
 		Place                                  g_place;
 		std::string                            g_folder;
 		bool                                   g_on = false;
@@ -316,15 +316,21 @@ namespace Tiles
 			}
 			g_tiles.clear();
 			g_asked.clear();
-			g_sheet = nullptr;
-			g_parent = nullptr;
-			g_on = false;
+		g_sheet.reset();
+		g_parent.reset();
+		g_on = false;
 		}
 	}
 
 	void Open(const std::string& a_edid, RE::NiAVObject* a_sheet, bool a_night)
 	{
-		if (g_on) {
+		const auto folder = std::format("Data/textures/terrain/gtsmap/t/{}/{}", a_edid, a_night ? "tiles_n" : "tiles");
+		if (g_on && g_sheet.get() == a_sheet) {
+			if (g_folder == folder) {
+				return;
+			}
+			Clear();
+		} else if (g_on) {
 			Clear();
 		}
 		if (!g_placesRead) {
@@ -334,11 +340,11 @@ namespace Tiles
 		if (it == g_places.end() || !a_sheet) {
 			return;
 		}
-		g_sheet = a_sheet;
+		g_sheet.reset(a_sheet);
 		g_place = it->second;
 		{
 			std::lock_guard l(g_lock);
-			g_folder = std::format("Data/textures/terrain/gtsmap/t/{}/{}", a_edid, a_night ? "tiles_n" : "tiles");
+			g_folder = folder;
 		}
 		if (!MakeSlots()) {
 			Clear();
